@@ -51,8 +51,7 @@ async def coords_to_maps(message: types.Message):
 
     # Başlangıç mesajı
     message_text = "Tesisatın yaklaşık en yakın konumu ve çevresinde bulunan yakın yapılar aşağıda belirtilmiştir;\n\n"
-
-    message_text += f"📍 Google Maps Linki: https://www.google.com/maps?q={lat},{lon}\n\n"
+    message_text += f"https://www.google.com/maps?q={lat},{lon}\n\n"
 
     # Adres bilgisi (Nominatim OpenStreetMap)
     try:
@@ -63,11 +62,18 @@ async def coords_to_maps(message: types.Message):
             "addressdetails": 1
         }, timeout=10)
         addr = r.json().get("address", {})
-        mahalle = addr.get("suburb") or addr.get("neighbourhood") or ""
-        sokak = addr.get("road") or ""
-        bina_no = addr.get("house_number") or ""
-        ilce = addr.get("city_district") or addr.get("county") or addr.get("city") or ""
-        message_text += f"🏠 Adres:\n{mahalle}, {sokak} {bina_no}, {ilce}\n\n"
+        # Eksik bilgileri atla
+        address_parts = []
+        if addr.get("suburb") or addr.get("neighbourhood"):
+            address_parts.append(addr.get("suburb") or addr.get("neighbourhood"))
+        if addr.get("road"):
+            address_parts.append(addr.get("road"))
+        if addr.get("house_number"):
+            address_parts.append(addr.get("house_number"))
+        if addr.get("city_district") or addr.get("county") or addr.get("city"):
+            address_parts.append(addr.get("city_district") or addr.get("county") or addr.get("city"))
+        if address_parts:
+            message_text += "🏠 Adres:\n" + ", ".join(address_parts) + "\n\n"
     except:
         message_text += "🏠 Adres bilgisi alınamadı.\n\n"
 
@@ -101,11 +107,14 @@ async def coords_to_maps(message: types.Message):
             else:
                 continue
             dist = haversine(lat, lon, poi_lat, poi_lon)
-            pois.append(f"- {name} ({amenity_tr}) ~{dist} m uzaklıkta")
+            pois.append((dist, f"- {name} ({amenity_tr}) ~{dist} m uzaklıkta"))
+
         if not pois:
             message_text += "Yakında mekan bulunamadı."
         else:
-            message_text += "📌 Yakındaki Mekanlar:\n" + "\n".join(pois)
+            # Mesafeye göre sırala ve en fazla 7 tane al
+            pois.sort(key=lambda x: x[0])
+            message_text += "📌 Yakındaki Mekanlar:\n" + "\n".join([p[1] for p in pois[:7]])
     except:
         message_text += "POI bilgisi alınamadı."
 
