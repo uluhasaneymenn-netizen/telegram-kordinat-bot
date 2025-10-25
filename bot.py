@@ -1,60 +1,31 @@
-import logging
 import asyncio
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import Message
 
-# 🔐 Telegram Token
 API_TOKEN = "8432197907:AAFWPgEDYeqe-hFVFXdCA8U7i0aB20VN7OQ"
-
-# 🗺️ Mapbox Token
-MAPBOX_TOKEN = "pk.3ea4c2c2a9f99983304d9c7ddc358c63"
-
-# Logging
-logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-
 @dp.message(Command("start"))
-async def start(message: Message):
-    await message.answer(
-        "👋 Merhaba! Bana bir koordinat gönder (örnek: `41.0082, 28.9784`)\n"
-        "Ben de sana harita görüntüsü ve Google linki atayım 🌍",
-        parse_mode="Markdown"
-    )
-
+async def start_command(message: types.Message):
+    await message.answer("👋 Merhaba! Bana koordinat gönder (örn: 41.0082, 28.9784) ve ben sana Google Maps linki vereyim.")
 
 @dp.message()
-async def handle_coordinate(message: Message):
-    text = message.text.strip().replace("°", "").replace("’", "").replace("‘", "")
-    text = text.replace(",", " ").replace("  ", " ")
+async def coords_to_maps(message: types.Message):
+    text = message.text.replace(',', ' ').strip()
     parts = text.split()
-
-    # 🧠 Koordinatları kontrol et
-    if len(parts) < 2:
-        await message.answer("⚠️ Lütfen geçerli bir koordinat gir (örnek: `41.0082, 28.9784`).")
-        return
 
     try:
         lat = float(parts[0])
         lon = float(parts[1])
-    except ValueError:
-        await message.answer("⚠️ Sayısal formatta bir koordinat girmen gerekiyor (örnek: `41.0082, 28.9784`).")
-        return
+        link = f"https://www.google.com/maps?q={lat},{lon}"
+        await message.reply(f"📍 {link}")
+    except:
+        pass  # koordinat değilse sessiz geç
 
-    # 🗺️ Mapbox statik harita URL’si
-    map_url = (
-        f"https://api.mapbox.com/styles/v1/mapbox/streets-v11/static/"
-        f"pin-s+ff0000({lon},{lat})/{lon},{lat},14,0/600x400"
-        f"?access_token={MAPBOX_TOKEN}"
-    )
+async def main():
+    await dp.start_polling(bot)
 
-    google_url = f"https://maps.google.com/?q={lat},{lon}"
-
-    # 🖼️ Haritayı gönder
-    await message.answer_photo(
-        map_url,
-        caption=f"📍 Koordinat: {lat}, {lon}\n🔗 [Google Maps'te aç]({google_url})",
-        parse_mode="Markdown"
+if __name__ == "__main__":
+    asyncio.run(main())
