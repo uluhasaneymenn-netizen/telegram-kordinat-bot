@@ -1,23 +1,22 @@
 import logging
+import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message
-import asyncio
-import re
 
-# 🟢 Telegram Bot Token
+# 🔐 Telegram Token
 API_TOKEN = "8432197907:AAFWPgEDYeqe-hFVFXdCA8U7i0aB20VN7OQ"
 
 # 🗺️ Mapbox Token
 MAPBOX_TOKEN = "pk.3ea4c2c2a9f99983304d9c7ddc358c63"
 
-# Log ayarları
+# Logging
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# 🔹 /start komutu
+
 @dp.message(Command("start"))
 async def start(message: Message):
     await message.answer(
@@ -26,42 +25,36 @@ async def start(message: Message):
         parse_mode="Markdown"
     )
 
-# 🔹 Koordinat algılama
+
 @dp.message()
 async def handle_coordinate(message: Message):
-    text = message.text.strip()
+    text = message.text.strip().replace("°", "").replace("’", "").replace("‘", "")
+    text = text.replace(",", " ").replace("  ", " ")
+    parts = text.split()
 
-    # 📍 Her türlü formatı yakalamak için regex (41.0082,28.9784 / 41.0082 28.9784)
-    match = re.match(r"([-+]?\d{1,2}\.\d+)[,\s]+([-+]?\d{1,3}\.\d+)", text)
-
-    if not match:
+    # 🧠 Koordinatları kontrol et
+    if len(parts) < 2:
         await message.answer("⚠️ Lütfen geçerli bir koordinat gir (örnek: `41.0082, 28.9784`).")
         return
 
-    lat = float(match.group(1))
-    lon = float(match.group(2))
+    try:
+        lat = float(parts[0])
+        lon = float(parts[1])
+    except ValueError:
+        await message.answer("⚠️ Sayısal formatta bir koordinat girmen gerekiyor (örnek: `41.0082, 28.9784`).")
+        return
 
-    # 🗺️ Mapbox harita görüntüsü
+    # 🗺️ Mapbox statik harita URL’si
     map_url = (
         f"https://api.mapbox.com/styles/v1/mapbox/streets-v11/static/"
         f"pin-s+ff0000({lon},{lat})/{lon},{lat},14,0/600x400"
         f"?access_token={MAPBOX_TOKEN}"
     )
 
-    # 🌍 Google Maps linki
     google_url = f"https://maps.google.com/?q={lat},{lon}"
 
-    # 🖼️ Harita fotoğrafını gönder
+    # 🖼️ Haritayı gönder
     await message.answer_photo(
         map_url,
         caption=f"📍 Koordinat: {lat}, {lon}\n🔗 [Google Maps'te aç]({google_url})",
         parse_mode="Markdown"
-    )
-
-# 🔹 Botu başlat
-async def main():
-    print("🤖 Bot çalışıyor...")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
