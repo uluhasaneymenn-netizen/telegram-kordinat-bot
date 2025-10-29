@@ -1,24 +1,13 @@
 # -*- coding: utf-8 -*-
-"""
-Kirpik Dünyası – Koordinat Algılama Botu (Dayanıklı + Gelişmiş OCR)
-Sıra: EXIF GPS → QR → OCR [PaddleOCR ➜ EasyOCR ➜ Tesseract] → Caption/Dosya adı
-Özellikler:
-- TR için akıllı işaret düzeltmesi (OCR başa '-' yapıştırırsa).
-- OpenCV ile çok-aşamalı ön-işleme ve çok denemeli OCR.
-- Yandex Static Maps, Google/Apple linkleri, (opsiyonel) Nominatim reverse geocode.
-- (Yeni) Overpass ile yakındaki mekanları listeleme.
-- Polling’de bağlantı kesilmesine karşı otomatik yeniden bağlanma ve oturum yenileme.
-"""
-
-import os, sys, re, time, logging
+import os, re, time, logging
 from io import BytesIO
 from datetime import datetime
-from math import radians, cos, sin, sqrt, atan2  # <-- yeni
+from math import radians, cos, sin, sqrt, atan2
 
 import requests
 import telebot
 from telebot import apihelper
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps, ExifTags
+from PIL import Image, ImageDraw, ImageFont, ExifTags
 import qrcode
 
 # ============= LOGGING =============
@@ -28,7 +17,8 @@ log = logging.getLogger("kirpik-ocr-bot")
 # ============= AYARLAR =============
 TOKEN = os.environ.get("TG_BOT_TOKEN", None)
 if not TOKEN:
-    # İstersen burada direkt token da yazabilirsin (güvenli değil; tercihen ortam değişkeni kullan)
+    # Güvenlik için ortam değişkenini kullanman önerilir.
+    # Gerekirse test amaçlı geçici olarak yazılabilir (PROD için boş bırak):
     TOKEN = "8297805648:AAFlFfJrNNbBXCPU91nuvQSc0Z_ZK7L4PCM"
 
 if not re.match(r'^\d+:[A-Za-z0-9_-]+$', TOKEN or ""):
@@ -39,12 +29,12 @@ NOMINATIM_UA = os.environ.get("NOMINATIM_UA", "kirpik-dunyasi-bot@example.com")
 YANDEX_LANG = "tr_TR"; YANDEX_ZOOM = 17; YANDEX_SIZE = (600, 400); YANDEX_PT_STYLE = "pm2rdm"
 NOMINATIM_DELAY = 1.0
 
-# (Yeni) Yakındaki mekanlar özelliği ayarları
+# Yakın mekanlar özelliği
 USE_NEARBY_POIS = True
 NEARBY_RADIUS = 500       # metre
-NEARBY_LIMIT  = 7         # en fazla kaç mekan gösterilecek
+NEARBY_LIMIT  = 7         # maksimum listelenecek mekan
 
-# Türkiye ipucu (yanlış '-' gelirse düzeltmek için). İstemezsen None yap.
+# Türkiye ipucu (yanlış '-' gelirse düzelt). İstemezsen None yap.
 REGION_HINT = "TR"
 
 # TeleBot init
@@ -56,7 +46,7 @@ try:
 except Exception:
     pass
 
-# Requests session TTL (destekleniyor olabilir)
+# Requests session TTL
 try:
     apihelper.SESSION_TIME_TO_LIVE = 300  # saniye
 except Exception:
@@ -99,7 +89,8 @@ except Exception as e:
 TESS_AVAILABLE = False
 try:
     import pytesseract
-    pytesseract.pytesseract.tesseract_cmd = os.environ.get(
+    from pytesseract import pytesseract as _pt
+    _pt.tesseract_cmd = os.environ.get(
         "TESSERACT_PATH", r"C:\Program Files\Tesseract-OCR\tesseract.exe"
     )
     TESS_AVAILABLE = True
@@ -116,16 +107,42 @@ COORD_PATTERNS = [
 
 # ============= YAKIN MEKANLAR (Yeni) =============
 AMENITY_TR = {
-    "cafe": "Kafe",
-    "school": "Okul",
-    "restaurant": "Restoran",
-    "hospital": "Hastane",
-    "clinic": "Poliklinik",
-    "bank": "Banka",
-    "pharmacy": "Eczane",
-    "parking": "Otopark",
-    "bar": "Bar",
-    "supermarket": "Süpermarket",
+    # Yeme-İçme
+    "cafe": "Kafe", "restaurant": "Restoran", "fast_food": "Yemek Alanı",
+    "food_court": "Yemek Alanı", "ice_cream": "Dondurmacı", "bar": "Bar",
+    "pub": "Pub", "biergarten": "Bira Bahçesi", "nightclub": "Gece Kulübü", "bbq": "Mangal Alanı",
+    # Sağlık
+    "hospital": "Hastane", "clinic": "Poliklinik", "doctors": "Doktor", "dentist": "Diş Hekimi",
+    "pharmacy": "Eczane", "veterinary": "Veteriner",
+    # Eğitim
+    "kindergarten": "Anaokulu", "school": "Okul", "college": "Yüksekokul",
+    "university": "Üniversite", "language_school": "Dil Okulu", "music_school": "Müzik Okulu",
+    "driving_school": "Sürücü Kursu", "library": "Kütüphane",
+    # Ulaşım / Otopark
+    "bus_station": "Otobüs Terminali", "ferry_terminal": "Feribot İskelesi", "taxi": "Taksi Durağı",
+    "bicycle_parking": "Bisiklet Parkı", "bicycle_rental": "Bisiklet Kiralama", "car_rental": "Araç Kiralama",
+    "car_sharing": "Araç Paylaşım Noktası", "parking": "Otopark", "parking_entrance": "Otopark Girişi",
+    "fuel": "Benzin İstasyonu", "charging_station": "Elektrikli Şarj İstasyonu", "car_wash": "Araba Yıkama",
+    # Finans / Posta / Güvenlik
+    "bank": "Banka", "atm": "ATM", "bureau_de_change": "Döviz Bürosu", "post_office": "Postane",
+    "post_box": "Posta Kutusu", "police": "Polis", "fire_station": "İtfaiye", "courthouse": "Adliye", "townhall": "Belediye",
+    # Kültür / Eğlence / Toplum
+    "arts_centre": "Sanat Merkezi", "theatre": "Tiyatro", "cinema": "Sinema", "planetarium": "Planetaryum",
+    "community_centre": "Toplum Merkezi", "conference_centre": "Kongre Merkezi", "exhibition_centre": "Sergi/Fuar Merkezi",
+    "events_venue": "Etkinlik Alanı", "coworking_space": "Ortak Çalışma Alanı", "youth_centre": "Gençlik Merkezi",
+    # İbadet
+    "place_of_worship": "İbadethane",
+    # Turistik / Diğer
+    "public_bath": "Hamam", "fountain": "Süs/İçme Çeşmesi", "drinking_water": "İçme Suyu",
+    "water_point": "Su Noktası", "shelter": "Barınak", "bench": "Bank", "picnic_site": "Piknik Alanı",
+    # Hijyen
+    "toilets": "Umumi Tuvalet", "shower": "Duş",
+    # Atık / Geri Dönüşüm
+    "waste_basket": "Çöp Kutusu", "waste_disposal": "Atık Bertaraf Noktası", "recycling": "Geri Dönüşüm Noktası",
+    # İletişim/BT
+    "internet_cafe": "İnternet Kafe", "telephone": "Ankesörlü Telefon",
+    # Konaklama
+    "guest_house": "Pansiyon", "hostel": "Hostel"
 }
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -264,8 +281,9 @@ def extract_coords_from_qr(img: Image.Image):
     return None
 
 # ---- OpenCV ön-işleme varyantları ----
-import cv2, np as _np  # NumPy ismini çakıştırmamak için alias
+import cv2
 import numpy as np
+
 def _prep_variants(pil_img: Image.Image):
     img = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -327,7 +345,8 @@ def _ocr_tess(img_bgr: np.ndarray) -> str | None:
         from PIL import Image as _PIL
         pil = _PIL.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
         config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789.,-+'
-        return pytesseract.image_to_string(pil, lang="eng+tur", config=config)
+        import pytesseract as _pt
+        return _pt.image_to_string(pil, lang="eng+tur", config=config)
     except Exception:
         return None
 
@@ -355,7 +374,8 @@ def reverse_geocode(lat, lon):
         resp.raise_for_status()
         js = resp.json()
         return js.get("display_name")
-    except Exception:
+    except Exception as e:
+        log.warning(f"Nominatim reverse hata: {e}")
         return None
 
 def get_address_simulation(lat, lon):
@@ -365,7 +385,7 @@ def get_address_simulation(lat, lon):
         return "Mahalle: Kurtuluş, Sokak: Cumhuriyet Blv., İlçe: Seyhan, İl: Adana"
     elif 37.024 <= lat <= 37.026 and 35.277 <= lon <= 35.279:
         return "Mahalle: Reşatbey, Sokak: Ziyapaşa Blv., İlçe: Seyhan, İl: Adana"
-    return "Adres (offline): bulunamadı"
+    return ""
 
 def _safe_text_bbox(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont):
     try:
@@ -387,7 +407,8 @@ def generate_map_image(lat, lon):
     try:
         r = requests.get(url, timeout=15); r.raise_for_status()
         img = Image.open(BytesIO(r.content)).convert("RGBA")
-    except Exception:
+    except Exception as e:
+        log.warning(f"Yandex static map alınamadı: {e}")
         return None
 
     draw = ImageDraw.Draw(img)
@@ -431,28 +452,39 @@ def start(message):
 
 @bot.message_handler(content_types=["text"])
 def handle_text(message):
-    c = extract_coords_from_text(message.text)
-    if not c:
-        bot.reply_to(message, "⚠️ Koordinat alınamadı. `36.123456, 35.654321` gibi gönderin ya da fotoğraf yükleyin.")
-        return
-    lat, lon = c[0], c[1]
-    bot.send_chat_action(message.chat.id, "upload_photo")
-    img_bytes = generate_map_image(lat, lon)
-    if not img_bytes:
-        bot.reply_to(message, "⚠️ Harita alınamadı."); return
-    address = reverse_geocode(lat, lon) if USE_ONLINE_REVERSE_GEOCODE else None
-    if not address: address = get_address_simulation(lat, lon)
-    caption = (f"Google Maps: https://www.google.com/maps?q={lat},{lon}\n"
-               f"Apple Maps: https://maps.apple.com/?ll={lat},{lon}\n"
-               f"Adres: {address}")
+    try:
+        c = extract_coords_from_text(message.text)
+        if not c:
+            bot.reply_to(message, "⚠️ Koordinat alınamadı. `36.123456, 35.654321` gibi gönderin ya da fotoğraf yükleyin.")
+            return
 
-    # (Yeni) Yakın mekanlar
-    if USE_NEARBY_POIS:
-        pois = fetch_nearby_pois(lat, lon, radius=NEARBY_RADIUS, limit=NEARBY_LIMIT)
-        if pois:
-            caption += "\n\n📌 Yakındaki Mekanlar:\n" + "\n".join(pois)
+        lat, lon = c[0], c[1]
+        bot.send_chat_action(message.chat.id, "upload_photo")
+        img_bytes = generate_map_image(lat, lon)
+        if not img_bytes:
+            bot.reply_to(message, "⚠️ Harita alınamadı.")
+            return
 
-    bot.send_photo(message.chat.id, img_bytes, caption=caption)
+        address = reverse_geocode(lat, lon) if USE_ONLINE_REVERSE_GEOCODE else None
+        if not address:
+            address = get_address_simulation(lat, lon)
+
+        caption = (
+            f"Google Maps: https://www.google.com/maps?q={lat},{lon}\n"
+            f"Apple Maps: https://maps.apple.com/?ll={lat},{lon}\n"
+            f"Adres: {address}"
+        )
+
+        # ✅ Yakın mekanlar — emojisiz başlık
+        if USE_NEARBY_POIS:
+            pois = fetch_nearby_pois(lat, lon, radius=NEARBY_RADIUS, limit=NEARBY_LIMIT)
+            if pois:
+                caption += "\n\nYakındaki mekanlar:\n" + "\n".join(pois)
+
+        bot.send_photo(message.chat.id, img_bytes, caption=caption)
+    except Exception as e:
+        log.warning(f"handle_text hata: {e}")
+        bot.reply_to(message, f"❌ Hata: {e}")
 
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
@@ -463,6 +495,7 @@ def handle_photo(message):
         if not file_path:
             bot.reply_to(message, "⚠️ Dosya bilgisi alınamadı.")
             return
+
         file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
         r = requests.get(file_url, timeout=30); r.raise_for_status()
         img = Image.open(BytesIO(r.content)).convert("RGB")
@@ -470,33 +503,41 @@ def handle_photo(message):
         c = resolve_coords_from_any(img, caption_text=message.caption or "",
                                     file_name=os.path.basename(file_path) or "")
         if not c:
-            bot.reply_to(message,
-                         f"❔ Fotoğraftan koordinat çıkarılamadı.\n"
-                         f"OCR: Paddle={PADDLE_AVAILABLE} / EasyOCR={EASYOCR_AVAILABLE} / Tesseract={TESS_AVAILABLE}\n"
-                         "İpucu: Fotoğraf açıklamasına `36.12345 35.67890` yazabilirsin.")
+            bot.reply_to(
+                message,
+                f"❔ Fotoğraftan koordinat çıkarılamadı.\n"
+                f"OCR: Paddle={PADDLE_AVAILABLE} / EasyOCR={EASYOCR_AVAILABLE} / Tesseract={TESS_AVAILABLE}\n"
+                "İpucu: Fotoğraf açıklamasına `36.12345 35.67890` yazabilirsin."
+            )
             return
 
         lat, lon, source = c
         bot.send_chat_action(message.chat.id, "upload_photo")
         img_bytes = generate_map_image(lat, lon)
         if not img_bytes:
-            bot.reply_to(message, "⚠️ Harita alınamadı."); return
+            bot.reply_to(message, "⚠️ Harita alınamadı.")
+            return
 
         address = reverse_geocode(lat, lon) if USE_ONLINE_REVERSE_GEOCODE else None
-        if not address: address = get_address_simulation(lat, lon)
-        caption = (f"Kaynak: {source.upper()}\n"
-                   f"Google Maps: https://www.google.com/maps?q={lat},{lon}\n"
-                   f"Apple Maps: https://maps.apple.com/?ll={lat},{lon}\n"
-                   f"Adres: {address}")
+        if not address:
+            address = get_address_simulation(lat, lon)
 
-        # (Yeni) Yakın mekanlar
+        caption = (
+            "ADANA ENDEKS OKUMA - KOORDİNATÖR\n\n"
+            f"Google Maps: https://www.google.com/maps?q={lat},{lon}\n"
+            f"Apple Maps: https://maps.apple.com/?ll={lat},{lon}\n"
+            f"Adres: {address}"
+        )
+
+        # ✅ Yakın mekanlar — emojisiz başlık
         if USE_NEARBY_POIS:
             pois = fetch_nearby_pois(lat, lon, radius=NEARBY_RADIUS, limit=NEARBY_LIMIT)
             if pois:
-                caption += "\n\n📌 Yakındaki Mekanlar:\n" + "\n".join(pois)
+                caption += "\n\nYakındaki mekanlar:\n" + "\n".join(pois)
 
-        bot.send_photo(message.chat.id, img_bytes, caption=caption)
+        bot.send_photo(message.chat.id, img_abytes, caption=caption)
     except Exception as e:
+        log.warning(f"handle_photo hata: {e}")
         bot.reply_to(message, f"❌ Hata: {e}")
 
 # ============= DAYANIKLI POLLING =============
