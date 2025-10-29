@@ -1,3 +1,21 @@
-aiogram==3.13.1
-aiohttp
-requests
+# === Core (zorunlu) ===
+pyTelegramBotAPI>=4.18
+requests>=2.31
+Pillow>=10.0
+numpy>=1.26
+opencv-python>=4.8
+qrcode>=7.4
+pyzbar>=0.1.9
+pytesseract>=0.3.10
+
+# Not: Tesseract binary harici kurulum ister (Windows: https://github.com/UB-Mannheim/tesseract/wiki)
+
+# === OCR (opsiyonel, ağır) ===
+# EasyOCR (PyTorch tabanlı) – CPU kurulumu büyük olabilir; Python 3.13 desteğini kontrol et.
+# easyocr>=1.7
+# torch>=2.2
+# torchvision>=0.17
+
+# PaddleOCR (PaddlePaddle tabanlı) – Windows’ta paddlepaddle için uygun wheel gerekebilir.
+# paddleocr>=2.7
+# paddlepaddle>=2.6  # veya GPU için: paddlepaddle-gpu
