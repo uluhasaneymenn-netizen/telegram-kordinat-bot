@@ -7,6 +7,10 @@ opencv-python>=4.8
 qrcode>=7.4
 pyzbar>=0.1.9
 pytesseract>=0.3.10
+easyocr>=1.7
+paddleocr>=2.9
+torch>=2.3  # (EasyOCR/Paddle GPU’suz da çalışır; Torch bazı ortamlarda şart olabilir)
+
 
 # Not: Tesseract binary harici kurulum ister (Windows: https://github.com/UB-Mannheim/tesseract/wiki)
 
